@@ -14,6 +14,10 @@ Cliente UDP con UI web local (React/Vite) y backend en Go. Implementa el protoco
 5. `go run .`
 6. Abre `http://localhost:8080`
 
+## Mock server local (UDP)
+- `go run ./cmd/mockserver`
+- Configura el cliente con `serverHost=127.0.0.1` y `serverPort=9999`
+
 ## Desarrollo (Vite + Go)
 - Terminal 1: `go run .`
 - Terminal 2: `cd frontend && npm install && npm run dev`
