@@ -1,6 +1,6 @@
 # Cliente UDP Chat
 
-Cliente UDP con UI web local (React/Vite) y backend en Go. Implementa el protocolo efímero con `JOIN`, `LIST`, `USERS`, `MSG`, `ACK`, `ERR` y límites de 1024 bytes por mensaje.
+Cliente UDP con UI web local (React/Vite) y backend en Go. Implementa el protocolo efímero con `LIST_USERS`, `USER_LIST`, `SEND_MSG`, `SEND_MSG_ACK`, `ERROR` y límites de 1024 bytes por mensaje.
 
 ## Requisitos
 - Go 1.21+
@@ -36,5 +36,7 @@ Cliente UDP con UI web local (React/Vite) y backend en Go. Implementa el protoco
 ## Notas de protocolo
 - Tamaño de JSON <= 1024 bytes
 - `from` y `to` solo `[A-Za-z0-9_-]`, case-insensitive, 1-20 chars
-- `text` 1-512 chars
+- `content` 1-512 chars
+- Campos JSON: `type`, `from`, `to`, `content`, `users`, `id`
+- `id` es UUID y se usa para mapear `SEND_MSG_ACK` al mensaje original
 - ACK timeout: 5s

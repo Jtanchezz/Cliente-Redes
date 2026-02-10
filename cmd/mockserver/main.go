@@ -29,19 +29,12 @@ type User struct {
 }
 
 type UDPMessage struct {
-	Server     string     `json:"server"`
-	From       string     `json:"from"`
-	To         string     `json:"to"`
-	Type       string     `json:"type"`
-	ID         string     `json:"id"`
-	Name       string     `json:"name,omitempty"`
-	ClientAddr string     `json:"client_addr,omitempty"`
-	Text       string     `json:"text,omitempty"`
-	RefID      string     `json:"ref_id,omitempty"`
-	Status     string     `json:"status,omitempty"`
-	Code       string     `json:"code,omitempty"`
-	Detail     string     `json:"detail,omitempty"`
-	Users      []UserInfo `json:"users,omitempty"`
+	Type    string     `json:"type"`
+	From    string     `json:"from,omitempty"`
+	To      string     `json:"to,omitempty"`
+	Content string     `json:"content,omitempty"`
+	Users   []UserInfo `json:"users,omitempty"`
+	ID      string     `json:"id,omitempty"`
 }
 
 type UserInfo struct {
@@ -52,7 +45,6 @@ type UserInfo struct {
 type Server struct {
 	mu        sync.Mutex
 	users     map[string]*User
-	pending   map[string]*net.UDPAddr
 	udpConn   *net.UDPConn
 	serverTag string
 }
@@ -60,7 +52,6 @@ type Server struct {
 func NewServer(conn *net.UDPConn) *Server {
 	return &Server{
 		users:   make(map[string]*User),
-		pending: make(map[string]*net.UDPAddr),
 		udpConn: conn,
 	}
 }
@@ -77,18 +68,18 @@ func (s *Server) serve() {
 			continue
 		}
 		if n > maxPacketSize {
-			s.sendErr(addr, "TOO_LONG", "message exceeds 1024 bytes", "")
+			s.sendErr(addr, "message exceeds 1024 bytes", "")
 			continue
 		}
 
 		var msg UDPMessage
 		if err := json.Unmarshal(buf[:n], &msg); err != nil {
-			s.sendErr(addr, "BAD_FORMAT", "invalid json", "")
+			s.sendErr(addr, "invalid json", "")
 			continue
 		}
 
 		if msg.Type == "" {
-			s.sendErr(addr, "UNKNOWN_TYPE", "missing type", msg.ID)
+			s.sendErr(addr, "missing type", msg.ID)
 			continue
 		}
 
@@ -98,52 +89,30 @@ func (s *Server) serve() {
 
 func (s *Server) handleMessage(msgType string, msg UDPMessage, addr *net.UDPAddr) {
 	switch msgType {
-	case "JOIN":
-		s.handleJoin(msg, addr)
-	case "LIST":
+	case "LIST_USERS":
 		s.handleList(msg, addr)
-	case "MSG":
+	case "SEND_MSG":
 		s.handleMsg(msg, addr)
-	case "ACK":
-		s.handleAck(msg, addr)
-	case "ERR":
-		log.Printf("client error from %s: %s", addr.String(), msg.Detail)
 	default:
-		s.sendErr(addr, "UNKNOWN_TYPE", "unknown message type", msg.ID)
+		s.sendErr(addr, "unknown message type", msg.ID)
 	}
-}
-
-func (s *Server) handleJoin(msg UDPMessage, addr *net.UDPAddr) {
-	name, err := normalizeName(msg.From)
-	if err != nil {
-		s.sendErr(addr, "USER_INVALID", err.Error(), msg.ID)
-		return
-	}
-	if name == "" {
-		name = normalizeOrEmpty(msg.Name)
-	}
-	if name == "" {
-		s.sendErr(addr, "USER_INVALID", "missing user", msg.ID)
-		return
-	}
-
-	s.mu.Lock()
-	s.users[name] = &User{Name: name, Addr: addr, LastSeen: time.Now()}
-	s.mu.Unlock()
-
-	log.Printf("join: %s @ %s", name, addr.String())
 }
 
 func (s *Server) handleList(msg UDPMessage, addr *net.UDPAddr) {
+	name, err := normalizeName(msg.From)
+	if err != nil {
+		s.sendErr(addr, err.Error(), msg.ID)
+		return
+	}
+	s.touchUser(name, addr)
 	users := s.snapshotUsers()
 
 	resp := UDPMessage{
-		Server: s.serverTag,
-		From:   "server",
-		To:     msg.From,
-		Type:   "USERS",
-		ID:     newUUID(),
-		Users:  users,
+		Type:  "USER_LIST",
+		From:  s.serverTag,
+		To:    msg.From,
+		ID:    newUUID(),
+		Users: users,
 	}
 	s.sendUDP(addr, resp)
 }
@@ -151,16 +120,16 @@ func (s *Server) handleList(msg UDPMessage, addr *net.UDPAddr) {
 func (s *Server) handleMsg(msg UDPMessage, addr *net.UDPAddr) {
 	from, err := normalizeName(msg.From)
 	if err != nil {
-		s.sendErr(addr, "USER_INVALID", err.Error(), msg.ID)
+		s.sendErr(addr, err.Error(), msg.ID)
 		return
 	}
 	to, err := normalizeName(msg.To)
 	if err != nil {
-		s.sendErr(addr, "USER_INVALID", err.Error(), msg.ID)
+		s.sendErr(addr, err.Error(), msg.ID)
 		return
 	}
-	if strings.TrimSpace(msg.Text) == "" {
-		s.sendErr(addr, "BAD_FORMAT", "missing text", msg.ID)
+	if strings.TrimSpace(msg.Content) == "" {
+		s.sendErr(addr, "missing content", msg.ID)
 		return
 	}
 
@@ -168,52 +137,26 @@ func (s *Server) handleMsg(msg UDPMessage, addr *net.UDPAddr) {
 
 	recipient := s.getUser(to)
 	if recipient == nil || !s.isOnline(recipient) {
-		s.sendErr(addr, "USER_NOT_FOUND", "recipient not online", msg.ID)
+		s.sendErr(addr, "recipient not online", msg.ID)
 		return
 	}
 
 	forward := UDPMessage{
-		Server: s.serverTag,
-		From:   from,
-		To:     to,
-		Type:   "MSG",
-		ID:     msg.ID,
-		Text:   msg.Text,
+		Type:    "SEND_MSG",
+		From:    from,
+		To:      to,
+		ID:      msg.ID,
+		Content: msg.Content,
 	}
 	s.sendUDP(recipient.Addr, forward)
 
-	s.mu.Lock()
-	s.pending[msg.ID] = addr
-	s.mu.Unlock()
-}
-
-func (s *Server) handleAck(msg UDPMessage, addr *net.UDPAddr) {
-	ref := strings.TrimSpace(msg.RefID)
-	if ref == "" {
-		return
+	ack := UDPMessage{
+		Type: "SEND_MSG_ACK",
+		From: s.serverTag,
+		To:   from,
+		ID:   msg.ID,
 	}
-
-	s.mu.Lock()
-	senderAddr, ok := s.pending[ref]
-	delete(s.pending, ref)
-	s.mu.Unlock()
-
-	if !ok || senderAddr == nil {
-		return
-	}
-
-	forward := UDPMessage{
-		Server: s.serverTag,
-		From:   msg.From,
-		To:     msg.To,
-		Type:   "ACK",
-		ID:     newUUID(),
-		RefID:  ref,
-		Status: "received",
-	}
-	s.sendUDP(senderAddr, forward)
-
-	s.touchUser(normalizeOrEmpty(msg.From), addr)
+	s.sendUDP(addr, ack)
 }
 
 func (s *Server) snapshotUsers() []UserInfo {
@@ -255,16 +198,13 @@ func (s *Server) isOnline(user *User) bool {
 	return time.Since(user.LastSeen) <= onlineWindow
 }
 
-func (s *Server) sendErr(addr *net.UDPAddr, code, detail, refID string) {
+func (s *Server) sendErr(addr *net.UDPAddr, detail, refID string) {
 	msg := UDPMessage{
-		Server: s.serverTag,
-		From:   "server",
-		To:     "",
-		Type:   "ERR",
-		ID:     newUUID(),
-		Code:   code,
-		Detail: detail,
-		RefID:  refID,
+		Type:    "ERROR",
+		From:    s.serverTag,
+		To:      "",
+		ID:      refID,
+		Content: detail,
 	}
 	s.sendUDP(addr, msg)
 }

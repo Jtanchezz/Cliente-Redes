@@ -31,19 +31,12 @@ type User struct {
 }
 
 type UDPMessage struct {
-	Server     string `json:"server"`
-	From       string `json:"from"`
-	To         string `json:"to"`
-	Type       string `json:"type"`
-	ID         string `json:"id"`
-	Name       string `json:"name,omitempty"`
-	ClientAddr string `json:"client_addr,omitempty"`
-	Text       string `json:"text,omitempty"`
-	RefID      string `json:"ref_id,omitempty"`
-	Status     string `json:"status,omitempty"`
-	Code       string `json:"code,omitempty"`
-	Detail     string `json:"detail,omitempty"`
-	Users      []User `json:"users,omitempty"`
+	Type    string `json:"type"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Content string `json:"content,omitempty"`
+	Users   []User `json:"users,omitempty"`
+	ID      string `json:"id,omitempty"`
 }
 
 type SSEBroker struct {
@@ -177,7 +170,7 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		go a.ackTimeoutLoop()
 	}
 
-	if err := a.sendJoin(); err != nil {
+	if err := a.sendListUsers(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -218,7 +211,7 @@ func (a *App) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" || len(text) > 512 {
-		writeError(w, http.StatusBadRequest, "text must be 1-512 characters")
+		writeError(w, http.StatusBadRequest, "content must be 1-512 characters")
 		return
 	}
 
@@ -230,12 +223,11 @@ func (a *App) handleSend(w http.ResponseWriter, r *http.Request) {
 
 	id := newUUID()
 	msg := UDPMessage{
-		Server: serverHost,
-		From:   from,
-		To:     to,
-		Type:   "MSG",
-		ID:     id,
-		Text:   text,
+		Type:    "SEND_MSG",
+		From:    from,
+		To:      to,
+		Content: text,
+		ID:      id,
 	}
 	if err := a.sendUDP(msg); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -259,14 +251,7 @@ func (a *App) handleList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "client not configured")
 		return
 	}
-	msg := UDPMessage{
-		Server: serverHost,
-		From:   from,
-		To:     "server",
-		Type:   "LIST",
-		ID:     newUUID(),
-	}
-	if err := a.sendUDP(msg); err != nil {
+	if err := a.sendListUsers(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -302,18 +287,15 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) sendJoin() error {
+func (a *App) sendListUsers() error {
 	from, serverHost, _, _ := a.getConnState()
 	if from == "" || serverHost == "" {
 		return errors.New("client not configured")
 	}
 	msg := UDPMessage{
-		Server: serverHost,
-		From:   from,
-		To:     "server",
-		Type:   "JOIN",
-		ID:     newUUID(),
-		Name:   from,
+		Type: "LIST_USERS",
+		From: from,
+		ID:   newUUID(),
 	}
 	return a.sendUDP(msg)
 }
@@ -325,12 +307,9 @@ func (a *App) getConnState() (string, string, *net.UDPAddr, *net.UDPConn) {
 }
 
 func (a *App) sendUDP(msg UDPMessage) error {
-	_, serverHost, serverAddr, conn := a.getConnState()
-	if serverAddr == nil || conn == nil || serverHost == "" {
+	_, _, serverAddr, conn := a.getConnState()
+	if serverAddr == nil || conn == nil {
 		return errors.New("client not configured")
-	}
-	if msg.Server == "" {
-		msg.Server = serverHost
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -385,13 +364,13 @@ func (a *App) udpReadLoop() {
 		}
 
 		switch strings.ToUpper(msg.Type) {
-		case "MSG":
+		case "SEND_MSG":
 			a.handleIncomingMessage(msg)
-		case "ACK":
+		case "SEND_MSG_ACK":
 			a.handleAck(msg)
-		case "USERS":
+		case "USER_LIST":
 			a.handleUsers(msg)
-		case "ERR":
+		case "ERROR":
 			a.handleErr(msg)
 		default:
 			a.broker.Publish("error", map[string]string{
@@ -403,8 +382,8 @@ func (a *App) udpReadLoop() {
 }
 
 func (a *App) handleIncomingMessage(msg UDPMessage) {
-	from, serverHost, _, _ := a.getConnState()
-	if from == "" || serverHost == "" {
+	from, _, _, _ := a.getConnState()
+	if from == "" {
 		return
 	}
 	if msg.To != "" && !strings.EqualFold(msg.To, from) {
@@ -414,28 +393,14 @@ func (a *App) handleIncomingMessage(msg UDPMessage) {
 		"id":        msg.ID,
 		"from":      msg.From,
 		"to":        msg.To,
-		"text":      msg.Text,
+		"text":      msg.Content,
 		"direction": "in",
 		"at":        time.Now().Format(time.RFC3339),
 	})
-	if msg.ID == "" {
-		return
-	}
-
-	ack := UDPMessage{
-		Server: serverHost,
-		From:   from,
-		To:     "server",
-		Type:   "ACK",
-		ID:     newUUID(),
-		RefID:  msg.ID,
-		Status: "received",
-	}
-	_ = a.sendUDP(ack)
 }
 
 func (a *App) handleAck(msg UDPMessage) {
-	ref := msg.RefID
+	ref := msg.ID
 	if ref == "" {
 		return
 	}
@@ -443,13 +408,9 @@ func (a *App) handleAck(msg UDPMessage) {
 	delete(a.pendingAcks, ref)
 	a.mu.Unlock()
 
-	status := msg.Status
-	if status == "" {
-		status = "received"
-	}
 	a.broker.Publish("ack", map[string]string{
 		"ref_id": ref,
-		"status": status,
+		"status": "received",
 	})
 }
 
@@ -465,9 +426,9 @@ func (a *App) handleUsers(msg UDPMessage) {
 
 func (a *App) handleErr(msg UDPMessage) {
 	a.broker.Publish("error", map[string]string{
-		"code":   msg.Code,
-		"detail": msg.Detail,
-		"ref_id": msg.RefID,
+		"code":   "ERROR",
+		"detail": msg.Content,
+		"ref_id": msg.ID,
 	})
 }
 
