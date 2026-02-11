@@ -1,42 +1,104 @@
 # Cliente UDP Chat
 
-Cliente UDP con UI web local (React/Vite) y backend en Go. Implementa el protocolo efímero con `LIST_USERS`, `USER_LIST`, `SEND_MSG`, `SEND_MSG_ACK`, `ERROR` y límites de 1024 bytes por mensaje.
+Cliente de chat **UDP** con interfaz web local (**React + Vite**) y backend en **Go**. El backend sirve la UI (SPA) desde `PUBLIC_DIR` y expone una API HTTP interna que traduce acciones de la UI a mensajes UDP usando un protocolo JSON **efímero** con límite estricto de **1024 bytes por datagrama**.
+
+Incluye un **mock server UDP** para pruebas locales.
+
+---
 
 ## Requisitos
-- Go 1.21+
-- Node 18+ (para build de UI)
+
+- **Go 1.21+**
+- **Node.js 18+** (solo para compilar la UI)
+
+---
+
+## Arquitectura (alto nivel)
+
+- **Frontend (React/Vite)**:
+  - En producción se compila a `frontend/dist` y lo sirve el backend Go como SPA.
+  - En desarrollo se usa Vite (`npm run dev`) con proxy a `/api`.
+
+- **Backend (Go)**:
+  - API HTTP interna para configurar el cliente, enviar mensajes, listar usuarios y consumir eventos por SSE.
+  - Socket UDP local (puerto efímero) para hablar con el servidor UDP configurado.
+
+- **Servidor UDP (mock)**:
+  - Implementa `LIST_USERS` y `SEND_MSG`.
+  - Mantiene un registro de usuarios “online” por ventana de actividad (`onlineWindow = 60s`).
+
+---
 
 ## Ejecución (UI compilada)
-1. `cd frontend`
-2. `npm install`
-3. `npm run build`
-4. `cd ..`
-5. `go run .`
-6. Abre `http://localhost:8080`
 
-## Mock server local (UDP)
-- `go run ./cmd/mockserver`
-- Configura el cliente con `serverHost=127.0.0.1` y `serverPort=9999`
+1. Compila la UI:
+   - `cd frontend`
+   - `npm install`
+   - `npm run build`
+
+2. Ejecuta el backend:
+   - `cd ..`
+   - `go run .`
+
+3. Abre:
+   - `http://localhost:8080`
+
+> Si `PUBLIC_DIR` no existe o no contiene la UI compilada, el backend muestra una página simple indicando cómo construirla.
+
+---
 
 ## Desarrollo (Vite + Go)
-- Terminal 1: `go run .`
-- Terminal 2: `cd frontend && npm install && npm run dev`
-- Abre el host que indique Vite. El proxy reenvía `/api` al backend.
 
-## Variables
-- `HTTP_ADDR`: dirección del backend HTTP. Default `:8080`.
-- `PUBLIC_DIR`: ruta a la UI compilada. Default `frontend/dist`.
+- Terminal 1 (backend):
+  - `go run .`
 
-## API interna
-- `POST /api/config` -> `{ user, serverHost, serverPort }`
-- `POST /api/send` -> `{ to, text }`
-- `POST /api/list`
-- `GET /api/events` -> SSE (`message`, `ack`, `users`, `error`, `status`)
+- Terminal 2 (frontend):
+  - `cd frontend`
+  - `npm install`
+  - `npm run dev`
 
-## Notas de protocolo
-- Tamaño de JSON <= 1024 bytes
-- `from` y `to` solo `[A-Za-z0-9_-]`, case-insensitive, 1-20 chars
-- `content` 1-512 chars
-- Campos JSON: `type`, `from`, `to`, `content`, `users`, `id`
-- `id` es UUID y se usa para mapear `SEND_MSG_ACK` al mensaje original
-- ACK timeout: 5s
+Abre el host que indique Vite. El proxy de desarrollo reenvía `/api` al backend.
+
+---
+
+## Mock server UDP (para pruebas)
+
+Levanta el servidor UDP de prueba:
+
+- `go run ./cmd/mockserver`
+
+Parámetros:
+- `-port` (default: `9999`)
+- `-tag`  (default: `mock-server`) → valor usado como `from` en respuestas del servidor
+
+Configuración recomendada del cliente:
+- `serverHost = 127.0.0.1`
+- `serverPort = 9999`
+
+---
+
+## Variables de entorno (backend HTTP)
+
+- `HTTP_ADDR`: dirección del servidor HTTP  
+  **Default:** `:8080`
+
+- `PUBLIC_DIR`: ruta de la UI compilada (SPA)  
+  **Default:** `frontend/dist`
+
+---
+
+## API interna (HTTP)
+
+Base: `http://<HTTP_ADDR>`
+
+### `POST /api/config`
+
+Configura el usuario local y el servidor UDP destino. Además:
+- abre el socket UDP local (si no existe),
+- inicia los loops de lectura UDP y expiración de ACKs (solo una vez),
+- dispara un `LIST_USERS` inicial,
+- emite evento SSE `status`.
+
+**Request**
+```json
+{ "user": "alice", "serverHost": "127.0.0.1", "serverPort": 9999 }
