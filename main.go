@@ -35,7 +35,7 @@ type UDPMessage struct {
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
 	Content string `json:"content,omitempty"`
-	Users   []User `json:"users,omitempty"`
+	Users   []User  `json:"users,omitempty"`
 	ID      string `json:"id,omitempty"`
 }
 
@@ -170,6 +170,10 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		go a.ackTimeoutLoop()
 	}
 
+	if err := a.sendIdentify(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := a.sendListUsers(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -287,6 +291,19 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *App) sendIdentify() error {
+	from, serverHost, _, _ := a.getConnState()
+	if from == "" || serverHost == "" {
+		return errors.New("client not configured")
+	}
+	msg := UDPMessage{
+		Type: "IDENTIFY",
+		From: from,
+		ID:   newUUID(),
+	}
+	return a.sendUDP(msg)
+}
+
 func (a *App) sendListUsers() error {
 	from, serverHost, _, _ := a.getConnState()
 	if from == "" || serverHost == "" {
@@ -370,7 +387,9 @@ func (a *App) udpReadLoop() {
 			a.handleAck(msg)
 		case "USER_LIST":
 			a.handleUsers(msg)
-		case "ERROR":
+		case "IDENTIFY_ACK":
+			a.handleIdentifyAck(msg)
+		case "ERR":
 			a.handleErr(msg)
 		default:
 			a.broker.Publish("error", map[string]string{
@@ -424,9 +443,16 @@ func (a *App) handleUsers(msg UDPMessage) {
 	})
 }
 
+func (a *App) handleIdentifyAck(msg UDPMessage) {
+	a.broker.Publish("status", map[string]interface{}{
+		"identified": true,
+		"at":         time.Now().Format(time.RFC3339),
+	})
+}
+
 func (a *App) handleErr(msg UDPMessage) {
 	a.broker.Publish("error", map[string]string{
-		"code":   "ERROR",
+		"code":   "ERR",
 		"detail": msg.Content,
 		"ref_id": msg.ID,
 	})

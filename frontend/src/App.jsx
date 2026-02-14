@@ -9,7 +9,7 @@ const formatTime = (iso) => {
 }
 
 const ackLabel = (ack) => {
-  if (ack === 'received') return 'Entregado'
+  if (ack === 'received') return 'Confirmado por servidor'
   if (ack === 'timeout') return 'Sin confirmación'
   return 'Pendiente'
 }
@@ -19,6 +19,7 @@ export default function App() {
   const [serverHost, setServerHost] = useState('')
   const [serverPort, setServerPort] = useState(defaultPort)
   const [connected, setConnected] = useState(false)
+  const [identified, setIdentified] = useState(false)
   const [status, setStatus] = useState('Sin conexión')
   const [messages, setMessages] = useState([])
   const [users, setUsers] = useState([])
@@ -78,13 +79,16 @@ export default function App() {
     es.addEventListener('status', (event) => {
       const data = safeJson(event)
       if (!data) return
-      setStatus(`Conectado a ${data.server}`)
+      if (data.identified) setIdentified(true)
+      if (data.server) {
+        setStatus(`Conectado a ${data.server}${data.identified ? ' (identificado)' : ''}`)
+      }
     })
 
     es.addEventListener('error', (event) => {
       const data = safeJson(event)
       if (!data) return
-      setLastError(`${data.code || 'ERROR'}: ${data.detail || 'fallo del protocolo'}`)
+      setLastError(`${data.code || 'ERR'}: ${data.detail || 'fallo del protocolo'}`)
     })
 
     es.onerror = () => {
@@ -107,6 +111,7 @@ export default function App() {
   const handleConnect = async (event) => {
     event.preventDefault()
     setLastError('')
+    setIdentified(false)
     setStatus('Conectando...')
     try {
       const res = await fetch('/api/config', {
@@ -183,8 +188,8 @@ export default function App() {
       <header className="header">
         <div>
           <p className="eyebrow">UDP Chat</p>
-          <h1>Cliente efímero</h1>
-          <p className="subtitle">Mensajes en tiempo real, sin historial, con confirmación.</p>
+          <h1>Cliente</h1>
+          <p className="subtitle">Mensajes en tiempo real, sin historial, con confirmación del servidor.</p>
         </div>
         <div className="status">
           <span className={connected ? 'dot online' : 'dot'} />
@@ -227,6 +232,7 @@ export default function App() {
             </label>
             <button type="submit" className="primary">Conectar</button>
           </form>
+          {connected && !identified && <p className="muted">Identificando...</p>}
           {lastError && <p className="error">{lastError}</p>}
         </section>
 

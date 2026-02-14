@@ -89,6 +89,8 @@ func (s *Server) serve() {
 
 func (s *Server) handleMessage(msgType string, msg UDPMessage, addr *net.UDPAddr) {
 	switch msgType {
+	case "IDENTIFY":
+		s.handleIdentify(msg, addr)
 	case "LIST_USERS":
 		s.handleList(msg, addr)
 	case "SEND_MSG":
@@ -96,6 +98,23 @@ func (s *Server) handleMessage(msgType string, msg UDPMessage, addr *net.UDPAddr
 	default:
 		s.sendErr(addr, "unknown message type", msg.ID)
 	}
+}
+
+func (s *Server) handleIdentify(msg UDPMessage, addr *net.UDPAddr) {
+	name, err := normalizeName(msg.From)
+	if err != nil {
+		s.sendErr(addr, err.Error(), msg.ID)
+		return
+	}
+	s.touchUser(name, addr)
+
+	ack := UDPMessage{
+		Type: "IDENTIFY_ACK",
+		From: s.serverTag,
+		To:   name,
+		ID:   msg.ID,
+	}
+	s.sendUDP(addr, ack)
 }
 
 func (s *Server) handleList(msg UDPMessage, addr *net.UDPAddr) {
@@ -110,7 +129,7 @@ func (s *Server) handleList(msg UDPMessage, addr *net.UDPAddr) {
 	resp := UDPMessage{
 		Type:  "USER_LIST",
 		From:  s.serverTag,
-		To:    msg.From,
+		To:    name,
 		ID:    newUUID(),
 		Users: users,
 	}
@@ -200,9 +219,8 @@ func (s *Server) isOnline(user *User) bool {
 
 func (s *Server) sendErr(addr *net.UDPAddr, detail, refID string) {
 	msg := UDPMessage{
-		Type:    "ERROR",
+		Type:    "ERR",
 		From:    s.serverTag,
-		To:      "",
 		ID:      refID,
 		Content: detail,
 	}
@@ -232,14 +250,6 @@ func normalizeName(input string) (string, error) {
 		return "", errors.New("name must be alphanumeric with _ or -")
 	}
 	return strings.ToLower(name), nil
-}
-
-func normalizeOrEmpty(input string) string {
-	name := strings.TrimSpace(input)
-	if name == "" || !usernameRe.MatchString(name) || len(name) > 20 {
-		return ""
-	}
-	return strings.ToLower(name)
 }
 
 func newUUID() string {
