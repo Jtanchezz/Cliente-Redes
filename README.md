@@ -1,104 +1,51 @@
 # Cliente UDP Chat
 
-Cliente de chat **UDP** con interfaz web local (**React + Vite**) y backend en **Go**. El backend sirve la UI (SPA) desde `PUBLIC_DIR` y expone una API HTTP interna que traduce acciones de la UI a mensajes UDP usando un protocolo JSON **efímero** con límite estricto de **1024 bytes por datagrama**.
-
-Incluye un **mock server UDP** para pruebas locales.
-
----
+Chat **UDP** con interfaz web local y backend en **Go** que actúa como puente **HTTP/SSE ↔ UDP**.  
+Los mensajes UDP se envían como **JSON UTF-8** con tamaño máximo de **1024 bytes** por datagrama.  
+Incluye un **servidor UDP de prueba (mockserver)**.
 
 ## Requisitos
+- Go 1.21+
+- Node.js 18+
 
-- **Go 1.21+**
-- **Node.js 18+** (solo para compilar la UI)
+## Componentes (qué hace cada uno)
+- **mockserver (Go / UDP)**: servidor UDP central. Mantiene usuarios “online” por ventana de actividad (60s), responde lista de usuarios, reenvía mensajes y envía confirmaciones/errores.
+- **backend (Go / HTTP + SSE)**: servidor local que sirve la UI y traduce acciones de la UI a UDP. Recibe UDP del servidor y lo publica a la UI en tiempo real por SSE.
+- **frontend (React)**: interfaz del chat en el navegador. No usa UDP directamente; solo habla con el backend local.
 
----
+## Protocolo UDP (resumen)
+Tipos:
+- `IDENTIFY` / `IDENTIFY_ACK`
+- `LIST_USERS` / `USER_LIST`
+- `SEND_MSG` / `SEND_MSG_ACK`
+- `ERR`
 
-## Arquitectura (alto nivel)
+Campos:
+- `type`, `from`, `to`, `content`, `users`, `id`
 
-- **Frontend (React/Vite)**:
-  - En producción se compila a `frontend/dist` y lo sirve el backend Go como SPA.
-  - En desarrollo se usa Vite (`npm run dev`) con proxy a `/api`.
+## Levantar en local (Windows 11)
+Desde la raíz del proyecto:
 
-- **Backend (Go)**:
-  - API HTTP interna para configurar el cliente, enviar mensajes, listar usuarios y consumir eventos por SSE.
-  - Socket UDP local (puerto efímero) para hablar con el servidor UDP configurado.
+1) Compilar la UI:
+- `cd frontend`
+- `npm install`
+- `npm run build`
+- `cd ..`
 
-- **Servidor UDP (mock)**:
-  - Implementa `LIST_USERS` y `SEND_MSG`.
-  - Mantiene un registro de usuarios “online” por ventana de actividad (`onlineWindow = 60s`).
-
----
-
-## Ejecución (UI compilada)
-
-1. Compila la UI:
-   - `cd frontend`
-   - `npm install`
-   - `npm run build`
-
-2. Ejecuta el backend:
-   - `cd ..`
-   - `go run .`
-
-3. Abre:
-   - `http://localhost:8080`
-
-> Si `PUBLIC_DIR` no existe o no contiene la UI compilada, el backend muestra una página simple indicando cómo construirla.
-
----
-
-## Desarrollo (Vite + Go)
-
-- Terminal 1 (backend):
-  - `go run .`
-
-- Terminal 2 (frontend):
-  - `cd frontend`
-  - `npm install`
-  - `npm run dev`
-
-Abre el host que indique Vite. El proxy de desarrollo reenvía `/api` al backend.
-
----
-
-## Mock server UDP (para pruebas)
-
-Levanta el servidor UDP de prueba:
-
+2) Levantar el servidor UDP:
 - `go run ./cmd/mockserver`
 
-Parámetros:
-- `-port` (default: `9999`)
-- `-tag`  (default: `mock-server`) → valor usado como `from` en respuestas del servidor
+3) Levantar el backend (sirve la UI):
+- `go run .`
 
-Configuración recomendada del cliente:
-- `serverHost = 127.0.0.1`
-- `serverPort = 9999`
+4) Abrir:
+- `http://localhost:8080`
 
----
+En la UI:
+- Servidor: `127.0.0.1`
+- Puerto: `9999`
 
-## Variables de entorno (backend HTTP)
-
-- `HTTP_ADDR`: dirección del servidor HTTP  
-  **Default:** `:8080`
-
-- `PUBLIC_DIR`: ruta de la UI compilada (SPA)  
-  **Default:** `frontend/dist`
-
----
-
-## API interna (HTTP)
-
-Base: `http://<HTTP_ADDR>`
-
-### `POST /api/config`
-
-Configura el usuario local y el servidor UDP destino. Además:
-- abre el socket UDP local (si no existe),
-- inicia los loops de lectura UDP y expiración de ACKs (solo una vez),
-- dispara un `LIST_USERS` inicial,
-- emite evento SSE `status`.
-
-**Request**
-```json
-{ "user": "alice", "serverHost": "127.0.0.1", "serverPort": 9999 }
+## Dos computadoras (misma red LAN)
+- Una computadora ejecuta el **servidor UDP** (`go run ./cmd/mockserver`) y debe permitir tráfico **UDP 9999** en el firewall.
+- Cada computadora ejecuta su **backend** local (`go run .`) y abre su UI en el navegador.
+- En ambas UIs, en “Servidor” se coloca la **IP LAN** de la computadora que está corriendo el servidor UDP (por ejemplo `192.168.1.50`) y puerto `9999`.
