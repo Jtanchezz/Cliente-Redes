@@ -9,9 +9,9 @@ const formatTime = (iso) => {
 }
 
 const ackLabel = (ack) => {
-  if (ack === 'received') return 'Confirmado por servidor'
-  if (ack === 'timeout') return 'Sin confirmación'
-  return 'Pendiente'
+  if (ack === 'received') return '✓ Confirmado por servidor'
+  if (ack === 'timeout') return '⏱ Sin confirmación'
+  return '… Enviando'
 }
 
 export default function App() {
@@ -44,18 +44,20 @@ export default function App() {
     es.addEventListener('message', (event) => {
       const data = safeJson(event)
       if (!data) return
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: data.id,
-          from: data.from,
-          to: data.to,
-          text: data.text,
-          direction: data.direction || 'in',
-          ack: data.ack || null,
-          at: data.at || new Date().toISOString()
-        }
-      ].slice(-200))
+      setMessages((prev) =>
+        [
+          ...prev,
+          {
+            id: data.id,
+            from: data.from,
+            to: data.to,
+            text: data.text,
+            direction: data.direction || 'in',
+            ack: data.ack || null,
+            at: data.at || new Date().toISOString()
+          }
+        ].slice(-200)
+      )
     })
 
     es.addEventListener('ack', (event) => {
@@ -63,9 +65,7 @@ export default function App() {
       if (!data || !data.ref_id) return
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === data.ref_id
-            ? { ...msg, ack: data.status || 'received' }
-            : msg
+          msg.id === data.ref_id ? { ...msg, ack: data.status || 'received' } : msg
         )
       )
     })
@@ -95,9 +95,7 @@ export default function App() {
       setStatus('Conexión SSE inestable')
     }
 
-    return () => {
-      es.close()
-    }
+    return () => es.close()
   }, [connected])
 
   useEffect(() => {
@@ -107,6 +105,9 @@ export default function App() {
 
   const onlineUsers = useMemo(() => users.filter((u) => u.online), [users])
   const offlineUsers = useMemo(() => users.filter((u) => !u.online), [users])
+
+  const statusTitle = connected ? (identified ? 'En línea' : 'Conectado') : 'Fuera de línea'
+  const statusDetail = connected ? status : 'Sin conexión'
 
   const handleConnect = async (event) => {
     event.preventDefault()
@@ -131,7 +132,7 @@ export default function App() {
       }
       setConnected(true)
       setStatus(`Conectado a ${data.serverHost}:${data.serverPort}`)
-    } catch (err) {
+    } catch {
       setStatus('Sin conexión')
       setLastError('Error de red con el backend')
     }
@@ -152,20 +153,22 @@ export default function App() {
         setLastError(data.error || 'No se pudo enviar')
         return
       }
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: data.id,
-          from: user,
-          to: recipient,
-          text,
-          direction: 'out',
-          ack: 'pending',
-          at: new Date().toISOString()
-        }
-      ].slice(-200))
+      setMessages((prev) =>
+        [
+          ...prev,
+          {
+            id: data.id,
+            from: user,
+            to: recipient,
+            text,
+            direction: 'out',
+            ack: 'pending',
+            at: new Date().toISOString()
+          }
+        ].slice(-200)
+      )
       setText('')
-    } catch (err) {
+    } catch {
       setLastError('Error de red con el backend')
     }
   }
@@ -175,10 +178,8 @@ export default function App() {
     try {
       const res = await fetch('/api/list', { method: 'POST' })
       const data = await res.json()
-      if (!res.ok) {
-        setLastError(data.error || 'No se pudo solicitar usuarios')
-      }
-    } catch (err) {
+      if (!res.ok) setLastError(data.error || 'No se pudo solicitar usuarios')
+    } catch {
       setLastError('Error de red con el backend')
     }
   }
@@ -186,20 +187,27 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <div>
+        <div className="brand">
           <p className="eyebrow">UDP Chat</p>
           <h1>Cliente</h1>
-          <p className="subtitle">Mensajes en tiempo real, sin historial, con confirmación del servidor.</p>
+          <p className="subtitle">
+            Mensajes en tiempo real, sin historial, con confirmación del servidor.
+          </p>
         </div>
-        <div className="status">
+
+        <div className="status" aria-live="polite">
           <span className={connected ? 'dot online' : 'dot'} />
-          <span>{status}</span>
+          <div className="status-text">
+            <span className="status-title">{statusTitle}</span>
+            <span className="status-detail">{statusDetail}</span>
+          </div>
         </div>
       </header>
 
       <div className="grid">
         <section className="panel connect">
           <h2>Conexión</h2>
+
           <form onSubmit={handleConnect} className="form">
             <label>
               Usuario
@@ -210,6 +218,7 @@ export default function App() {
                 required
               />
             </label>
+
             <label>
               Servidor
               <input
@@ -219,6 +228,7 @@ export default function App() {
                 required
               />
             </label>
+
             <label>
               Puerto
               <input
@@ -230,27 +240,46 @@ export default function App() {
                 required
               />
             </label>
-            <button type="submit" className="primary">Conectar</button>
+
+            <button type="submit" className="primary">
+              {connected ? 'Reconectar' : 'Conectar'}
+            </button>
           </form>
-          {connected && !identified && <p className="muted">Identificando...</p>}
+
+          {connected && !identified && <p className="muted">Identificando…</p>}
+          {!connected && (
+            <p className="hint">
+              Tip: asegúrate de que el backend esté arriba y que el servidor UDP sea accesible.
+            </p>
+          )}
+
           {lastError && <p className="error">{lastError}</p>}
         </section>
 
         <section className="panel users">
           <div className="panel-header">
-            <h2>Usuarios</h2>
+            <h2>
+              Usuarios <span className="badge">{onlineUsers.length} online</span>
+            </h2>
             <button className="ghost" type="button" onClick={handleList} disabled={!connected}>
               Actualizar
             </button>
           </div>
+
+          <p className="hint">Haz clic en un usuario para seleccionarlo como destinatario.</p>
+
           <div className="users-list">
             <div>
-              <p className="list-title">En línea</p>
+              <p className="list-title">
+                En línea <span className="badge">{onlineUsers.length}</span>
+              </p>
+
               {onlineUsers.length === 0 && <p className="muted">Sin usuarios</p>}
+
               {onlineUsers.map((u) => (
                 <button
                   key={`online-${u.name}`}
-                  className="user-chip"
+                  className={`user-chip ${recipient === u.name ? 'selected' : ''}`}
                   type="button"
                   onClick={() => setRecipient(u.name)}
                 >
@@ -259,13 +288,18 @@ export default function App() {
                 </button>
               ))}
             </div>
+
             <div>
-              <p className="list-title">Fuera de línea</p>
+              <p className="list-title">
+                Fuera de línea <span className="badge">{offlineUsers.length}</span>
+              </p>
+
               {offlineUsers.length === 0 && <p className="muted">Sin usuarios</p>}
+
               {offlineUsers.map((u) => (
                 <button
                   key={`offline-${u.name}`}
-                  className="user-chip ghost"
+                  className={`user-chip ghost ${recipient === u.name ? 'selected' : ''}`}
                   type="button"
                   onClick={() => setRecipient(u.name)}
                 >
@@ -289,12 +323,14 @@ export default function App() {
               />
             </div>
           </div>
-          <div className="messages">
+
+          <div className="messages" role="log" aria-live="polite">
             {messages.length === 0 && (
               <div className="empty">
                 <p>Escribe un mensaje para iniciar.</p>
               </div>
             )}
+
             {messages.map((msg) => (
               <div key={msg.id} className={`message ${msg.direction}`}>
                 <div className="bubble">
@@ -302,25 +338,31 @@ export default function App() {
                     <span>{msg.direction === 'out' ? 'Tú' : msg.from}</span>
                     <span>{formatTime(msg.at)}</span>
                   </p>
+
                   <p className="text">{msg.text}</p>
+
                   {msg.direction === 'out' && (
-                    <p className={`ack ${msg.ack || 'pending'}`}>
-                      {ackLabel(msg.ack)}
-                    </p>
+                    <p className={`ack ${msg.ack || 'pending'}`}>{ackLabel(msg.ack)}</p>
                   )}
                 </div>
               </div>
             ))}
+
             <div ref={bottomRef} />
           </div>
+
           <form onSubmit={handleSend} className="composer">
             <input
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Escribe tu mensaje..."
+              placeholder={connected ? 'Escribe tu mensaje…' : 'Conéctate para enviar mensajes…'}
               disabled={!connected}
             />
-            <button type="submit" className="primary" disabled={!connected || !recipient}>
+            <button
+              type="submit"
+              className="primary"
+              disabled={!connected || !recipient || !text.trim()}
+            >
               Enviar
             </button>
           </form>
