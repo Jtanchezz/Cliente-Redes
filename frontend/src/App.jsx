@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import jdImage from './JD.png'
+import joseImage from './Jose.png'
 
 const defaultPort = 9999
 
@@ -185,80 +187,92 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="brand">
-          <p className="eyebrow">UDP Chat</p>
-          <h1>Cliente</h1>
-          <p className="subtitle">
-            Mensajes en tiempo real, sin historial, con confirmación del servidor.
-          </p>
-        </div>
-
-        <div className="status" aria-live="polite">
-          <span className={connected ? 'dot online' : 'dot'} />
-          <div className="status-text">
-            <span className="status-title">{statusTitle}</span>
-            <span className="status-detail">{statusDetail}</span>
+    <div className="scene">
+      <div className="floating-portraits" aria-hidden="true">
+        <div className="floating-x jose">
+          <div className="floating-y jose">
+            <img className="floating-avatar jose" src={joseImage} alt="" />
           </div>
         </div>
-      </header>
+        <div className="floating-x jd">
+          <div className="floating-y jd">
+            <img className="floating-avatar jd" src={jdImage} alt="" />
+          </div>
+        </div>
+      </div>
 
-      <div className="grid">
-        <section className="panel connect">
-          <h2>Conexión</h2>
+      <div className="app">
+        <header className="header">
+        <div className="brand">
+          <p className="eyebrow">UDP Chat</p>
+          <p className="authors">Jose Tanchez & Juan Letona</p>
+          <h1>CLIENTE-REDES</h1>
+          </div>
 
-          <form onSubmit={handleConnect} className="form">
-            <label>
-              Usuario
-              <input
-                value={user}
-                onChange={(e) => setUser(e.target.value)}
-                placeholder="tu_nombre"
-                required
-              />
-            </label>
+          <div className="status" aria-live="polite">
+            <span className={connected ? 'dot online' : 'dot'} />
+            <div className="status-text">
+              <span className="status-title">{statusTitle}</span>
+              <span className="status-detail">{statusDetail}</span>
+            </div>
+          </div>
+        </header>
 
-            <label>
-              Servidor
-              <input
-                value={serverHost}
-                onChange={(e) => setServerHost(e.target.value)}
-                placeholder="192.168.1.10"
-                required
-              />
-            </label>
+        <div className="grid">
+          <section className="panel connect">
+            <h2>Conexión</h2>
 
-            <label>
-              Puerto
-              <input
-                type="number"
-                value={serverPort}
-                onChange={(e) => setServerPort(e.target.value)}
-                min="1"
-                max="65535"
-                required
-              />
-            </label>
+            <form onSubmit={handleConnect} className="form">
+              <label>
+                Usuario
+                <input
+                  value={user}
+                  onChange={(e) => setUser(e.target.value)}
+                  placeholder="tu_nombre"
+                  required
+                />
+              </label>
 
-            <button type="submit" className="primary">
-              {connected ? 'Reconectar' : 'Conectar'}
-            </button>
-          </form>
+              <label>
+                Servidor
+                <input
+                  value={serverHost}
+                  onChange={(e) => setServerHost(e.target.value)}
+                  placeholder="192.168.1.10"
+                  required
+                />
+              </label>
 
-          {connected && !identified && <p className="muted">Identificando…</p>}
-          {!connected && (
-            <p className="hint">
-              Tip: asegúrate de que el backend esté arriba y que el servidor UDP sea accesible.
-            </p>
-          )}
+              <label>
+                Puerto
+                <input
+                  type="number"
+                  value={serverPort}
+                  onChange={(e) => setServerPort(e.target.value)}
+                  min="1"
+                  max="65535"
+                  required
+                />
+              </label>
 
-          {lastError && <p className="error">{lastError}</p>}
-        </section>
+              <button type="submit" className="primary">
+                {connected ? 'Reconectar' : 'Conectar'}
+              </button>
+            </form>
+
+            {connected && !identified && <p className="muted">Identificando…</p>}
+            {!connected && (
+              <p className="hint">
+                Tip: asegúrate de que el backend esté arriba y que el servidor UDP sea accesible.
+              </p>
+            )}
+
+            {lastError && <p className="error">{lastError}</p>}
+          </section>
 
         <section className="panel users">
           <div className="panel-header">
-            <h2>
+            <h2 className="panel-title">
               Usuarios <span className="badge">{onlineUsers.length} online</span>
             </h2>
             <button className="ghost" type="button" onClick={handleList} disabled={!connected}>
@@ -313,8 +327,8 @@ export default function App() {
 
         <section className="panel chat">
           <div className="panel-header">
-            <h2>Chat</h2>
-            <div className="recipient">
+            <h2 className="panel-title">Chat</h2>
+            <div className="recipient compact">
               <span>Para</span>
               <input
                 value={recipient}
@@ -367,6 +381,7 @@ export default function App() {
             </button>
           </form>
         </section>
+      </div>
       </div>
     </div>
   )
